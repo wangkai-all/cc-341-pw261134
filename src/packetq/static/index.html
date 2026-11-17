@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>多租户压缩包队列 · 管控台</title>
+<style>
+  :root {
+    --bg: #0f141b; --panel: #18202b; --panel2: #1f2a38; --line: #2b394a;
+    --txt: #dce5f0; --muted: #8fa3ba; --accent: #4ea1ff; --ok: #37c978;
+    --warn: #f0b429; --bad: #f2616b; --dead: #9aa7b8;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--txt);
+    font: 14px/1.55 -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
+  header { padding: 14px 22px; background: var(--panel); border-bottom: 1px solid var(--line);
+    display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
+  header h1 { font-size: 17px; margin: 0; }
+  .pill { padding: 2px 10px; border-radius: 999px; font-size: 12px; border: 1px solid var(--line); }
+  .pill.alive { color: var(--ok); border-color: var(--ok); }
+  .pill.dead { color: var(--bad); border-color: var(--bad); }
+  main { padding: 18px 22px; max-width: 1280px; margin: 0 auto; display: grid; gap: 16px; }
+  .grid { display: grid; gap: 16px; }
+  .grid.cols3 { grid-template-columns: repeat(3, 1fr); }
+  .grid.cols2 { grid-template-columns: 1fr 1fr; }
+  @media (max-width: 980px) { .grid.cols3, .grid.cols2 { grid-template-columns: 1fr; } }
+  section.card { background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 14px 16px; }
+  h2 { font-size: 14px; margin: 0 0 10px; color: var(--muted); font-weight: 600;
+    text-transform: uppercase; letter-spacing: .06em; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 7px 9px; border-bottom: 1px solid var(--line);
+    vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; }
+  tr:hover td { background: var(--panel2); }
+  code { background: var(--panel2); padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+  .meter { height: 8px; background: var(--panel2); border-radius: 6px; overflow: hidden; margin-top: 5px; }
+  .meter > div { height: 100%; background: var(--accent); transition: width .4s; }
+  .meter > div.warn { background: var(--warn); }
+  .meter > div.bad { background: var(--bad); }
+  .status { padding: 1px 8px; border-radius: 999px; font-size: 12px; white-space: nowrap;
+    border: 1px solid var(--line); }
+  .s-queued { color: var(--accent); } .s-processing { color: var(--warn); }
+  .s-quarantined { color: var(--bad); border-color: var(--bad); }
+  .s-dead { color: var(--dead); border-color: var(--dead); }
+  .s-ready { color: #b48cff; } .s-done { color: var(--ok); }
+  .gapbox { background: rgba(242,97,107,.09); border: 1px solid var(--bad);
+    border-radius: 8px; padding: 8px 10px; margin-top: 8px; font-size: 12.5px; }
+  .gapbox.dead { background: rgba(154,167,184,.08); border-color: var(--dead); }
+  button { background: var(--accent); color: #08121f; border: 0; border-radius: 6px;
+    padding: 6px 12px; font-weight: 600; cursor: pointer; font-size: 13px; }
+  button.ghost { background: transparent; color: var(--txt); border: 1px solid var(--line); }
+  button.danger { background: var(--bad); color: #1a0709; }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  input[type=text], input[type=file] { background: var(--panel2); border: 1px solid var(--line);
+    color: var(--txt); border-radius: 6px; padding: 6px 9px; font-size: 13px; width: 100%; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .row > * { flex: 1; min-width: 140px; }
+  .muted { color: var(--muted); font-size: 12px; }
+  .ok-text { color: var(--ok); } .bad-text { color: var(--bad); }
+  .warn-text { color: var(--warn); }
+  pre { white-space: pre-wrap; word-break: break-all; margin: 0;
+    background: var(--panel2); padding: 10px; border-radius: 8px; max-height: 320px; overflow: auto; }
+  .toast { position: fixed; right: 22px; bottom: 22px; background: var(--panel2);
+    border: 1px solid var(--line); padding: 10px 14px; border-radius: 8px; opacity: 0;
+    transition: opacity .25s; max-width: 420px; z-index: 9; }
+  .toast.show { opacity: 1; } .toast.err { border-color: var(--bad); }
+  .tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+  .tabs button { flex: 0 0 auto; }
+  .mini { font-size: 12px; padding: 3px 8px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>多租户压缩包队列 · 容错管控台</h1>
+  <div id="components" class="row" style="flex:none"></div>
+  <span class="muted" id="updated"></span>
+  <button class="ghost mini" onclick="refreshAll()">立即刷新</button>
+  <label class="muted" style="flex:none"><input type="checkbox" id="auto" checked> 2秒自动刷新</label>
+</header>
+
+<main>
+  <section class="card">
+    <h2>额度占用（处理器：内存 / 临时盘 / 解压上限）</h2>
+    <div class="grid cols3" id="quota"></div>
+  </section>
+
+  <div class="grid cols2">
+    <section class="card">
+      <h2>投递新压缩包（写入 spool，由入口登记）</h2>
+      <div class="row">
+        <input type="text" id="upTenant" placeholder="租户 ID，如 tenant-a">
+        <input type="text" id="upUid" placeholder="客户端 UID（留空自动生成）">
+      </div>
+      <div class="row" style="margin-top:8px">
+        <input type="file" id="upFile" accept=".gz">
+        <button onclick="uploadPacket()">投递</button>
+      </div>
+      <p class="muted" style="margin-bottom:0">包格式：gzip(JSONL)，每行 <code>{"id":..,"payload":..}</code></p>
+    </section>
+
+    <section class="card">
+      <h2>消费者结果核对（库内连续性 + 外部结果文件哈希比对）</h2>
+      <div class="row">
+        <button onclick="runVerify()">执行核对</button>
+        <span id="verifySummary" class="muted">尚未执行</span>
+      </div>
+      <div id="verifyDetail" style="margin-top:10px"></div>
+    </section>
+  </div>
+
+  <section class="card">
+    <h2>租户视图：隔离原因与租户缺口</h2>
+    <div id="tenants"></div>
+  </section>
+
+  <section class="card">
+    <h2>包明细与处置（隔离包可回放修正 / 确认跳号）</h2>
+    <div class="tabs" style="margin-bottom:10px">
+      <button class="ghost mini" onclick="setFilter('')">全部</button>
+      <button class="ghost mini" onclick="setFilter('quarantined')">仅隔离</button>
+      <button class="ghost mini" onclick="setFilter('queued')">排队</button>
+      <button class="ghost mini" onclick="setFilter('ready')">待消费</button>
+      <button class="ghost mini" onclick="setFilter('done')">已完成</button>
+      <button class="ghost mini" onclick="setFilter('dead')">已跳号</button>
+    </div>
+    <div style="overflow:auto"><table id="packetTable">
+      <thead><tr><th>租户</th><th>序号</th><th>状态</th><th>消息数</th><th>尝试</th>
+        <th>隔离原因 / 详情</th><th>处置</th></tr></thead>
+      <tbody></tbody>
+    </table></div>
+  </section>
+
+  <section class="card">
+    <h2>审计事件（最近 50 条）</h2>
+    <div style="overflow:auto"><table id="auditTable">
+      <thead><tr><th>时间</th><th>组件</th><th>事件</th><th>租户</th><th>详情</th></tr></thead>
+      <tbody></tbody>
+    </table></div>
+  </section>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script>
+let filterStatus = '';
+
+function fmtBytes(n) {
+  if (n == null) return '—';
+  const units = ['B', 'KB', 'MB', 'GB']; let i = 0;
+  while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
+  return n.toFixed(n < 10 && i > 0 ? 1 : 0) + ' ' + units[i];
+}
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"]/g, c =>
+    ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+}
+function toast(msg, isErr) {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.className = 'toast show' + (isErr ? ' err' : '');
+  setTimeout(() => t.className = 'toast', 4200);
+}
+async function apiGet(path) {
+  const r = await fetch(path);
+  if (!r.ok) throw new Error((await r.json()).error || r.status);
+  return r.json();
+}
+async function apiSend(path, method, body, headers) {
+  const r = await fetch(path, {method, body, headers: headers || {}});
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.error || r.status);
+  return data;
+}
+
+function meter(label, used, limit) {
+  const pct = limit ? Math.min(100, used * 100 / limit) : 0;
+  const cls = pct >= 95 ? 'bad' : pct >= 75 ? 'warn' : '';
+  return `<div><div class="muted">${label}：<b>${fmtBytes(used)}</b> / ${fmtBytes(limit)}
+      <span class="${pct>=95?'bad-text':pct>=75?'warn-text':'muted'}">${pct.toFixed(1)}%</span></div>
+    <div class="meter"><div class="${cls}" style="width:${pct}%"></div></div></div>`;
+}
+
+async function refreshState() {
+  const data = await apiGet('/api/state');
+  document.getElementById('components').innerHTML = data.components.map(c =>
+    `<span class="pill ${c.alive ? 'alive' : 'dead'}">${esc(c.name)} · ` +
+    `${c.alive ? '运行中' : '宕机/未启动'}</span>`).join('');
+  document.getElementById('updated').textContent = '更新于 ' + new Date().toLocaleTimeString();
+
+  const q = data.quota;
+  document.getElementById('quota').innerHTML =
+    meter('处理器内存 RSS', q.memory.used, q.memory.limit) +
+    meter('临时盘 tmp_extract', q.temp_disk.used, q.temp_disk.limit) +
+    `<div><div class="muted">单包解压上限：<b>${fmtBytes(q.uncompressed_per_packet.limit)}</b></div>
+      <div class="muted" style="margin-top:6px">存储：spool ${fmtBytes(q.storage.spool)}
+      · blobs ${fmtBytes(q.storage.blobs)} · 拒收 ${fmtBytes(q.storage.rejected)}</div>
+      <div class="muted">采样时间：${esc(q.sampled_at || '—')}</div></div>`;
+
+  document.getElementById('tenants').innerHTML = data.tenants.length === 0
+    ? '<p class="muted">暂无租户（投递第一个包后出现）</p>'
+    : data.tenants.map(t => {
+        const counts = t.packet_counts || {};
+        const chips = Object.entries(counts).filter(([,n]) => n > 0).map(([k,n]) =>
+          `<span class="status s-${k}">${esc(k)} ×${n}</span>`).join(' ');
+        const gaps = t.gaps.map(g => `<div class="gapbox ${g.kind === 'dead' ? 'dead' : ''}">
+            <b>${g.kind === 'dead' ? '永久缺口（已确认跳号）' : '隔离中（租户队头阻塞点）'}</b>
+            包序号 #${g.seq} <code>${esc(g.packet_id)}</code><br>
+            原因：<b>${esc(g.error_label)}</b> — ${esc(g.error_detail)}
+          </div>`).join('');
+        return `<div style="padding:10px 0;border-bottom:1px solid var(--line)">
+          <div class="row" style="flex-wrap:wrap">
+            <b style="flex:0 0 auto">${esc(t.tenant_id)}</b>
+            <span class="muted">包序号 1..${t.packet_last_seq} · 消息 ${t.messages_consumed}/${t.messages_total}
+              已消费 · 最大消息序号 ${t.messages_max_seq}</span>
+            <span style="flex:0 0 auto">${chips}</span>
+            <span class="pill ${t.is_complete ? 'alive' : 'dead'}" style="flex:0 0 auto">
+              ${t.is_complete ? '租户完整' : (t.blocked_at_seq ? '阻塞于 #' + t.blocked_at_seq : '处理中')}</span>
+          </div>${gaps}</div>`;
+      }).join('');
+}
+
+async function refreshPackets() {
+  const qs = filterStatus ? '?status=' + filterStatus : '';
+  const data = await apiGet('/api/packets' + qs);
+  const tb = document.querySelector('#packetTable tbody');
+  tb.innerHTML = data.packets.length === 0
+    ? '<tr><td colspan="7" class="muted">无匹配包</td></tr>'
+    : data.packets.map(p => {
+        const actions = p.status === 'quarantined' ? `
+          <label class="mini ghost" style="display:inline-block;cursor:pointer">
+            上传修正包并回放<input type="file" accept=".gz" style="display:none"
+              onchange="retryPacket('${p.id}', this.files[0])"></label>
+          <button class="ghost mini" onclick="retryPacket('${p.id}', null)">原包重试</button>
+          <button class="danger mini" onclick="discardPacket('${p.id}')">确认跳号</button>`
+          : '<span class="muted">—</span>';
+        return `<tr>
+          <td><b>${esc(p.tenant_id)}</b></td><td>#${p.seq}</td>
+          <td><span class="status s-${p.status}">${esc(p.status_label)}</span></td>
+          <td>${p.msg_count ?? '—'}</td><td>${p.attempts}</td>
+          <td>${p.error_code ? `<b class="bad-text">${esc(p.error_label)}</b><br>
+            <span class="muted">${esc(p.error_detail)}</span>` : '<span class="muted">—</span>'}</td>
+          <td style="white-space:nowrap">${actions}</td></tr>`;
+      }).join('');
+}
+
+async function refreshAudit() {
+  const data = await apiGet('/api/audit?limit=50');
+  document.querySelector('#auditTable tbody').innerHTML = data.events.map(e =>
+    `<tr><td class="muted">${esc(e.ts.slice(11))}</td><td>${esc(e.component)}</td>
+     <td>${esc(e.event_type)}</td><td>${esc(e.tenant_id || '—')}</td>
+     <td><code>${esc(JSON.stringify(e.detail))}</code></td></tr>`).join('');
+}
+
+async function uploadPacket() {
+  const tenant = document.getElementById('upTenant').value.trim();
+  const uid = document.getElementById('upUid').value.trim();
+  const file = document.getElementById('upFile').files[0];
+  if (!tenant) return toast('请填写租户 ID', true);
+  if (!file) return toast('请选择 .gz 压缩包', true);
+  try {
+    const data = await apiSend('/api/upload', 'POST', file,
+      {'Content-Type': 'application/gzip',
+       'X-Tenant-Id': tenant, 'X-Client-Uid': uid});
+    toast('已投递：' + data.spooled_as);
+    document.getElementById('upFile').value = '';
+  } catch (e) { toast(e.message, true); }
+}
+
+async function retryPacket(packetId, file) {
+  try {
+    const data = await apiSend(`/api/packets/${packetId}/retry`, 'POST',
+      file || null, file ? {'Content-Type': 'application/gzip'} : {});
+    toast('回放已排队：' + data.note);
+  } catch (e) { toast(e.message, true); }
+}
+
+async function discardPacket(packetId) {
+  if (!confirm('确认跳号？该租户序号将永久留下缺口（页面会持续展示），不可自动恢复。')) return;
+  try {
+    const data = await apiSend(`/api/packets/${packetId}/discard`, 'POST', null, {});
+    toast(data.note);
+  } catch (e) { toast(e.message, true); }
+}
+
+async function runVerify() {
+  const box = document.getElementById('verifyDetail');
+  box.innerHTML = '<p class="muted">核对中…</p>';
+  try {
+    const v = await apiGet('/api/verify');
+    document.getElementById('verifySummary').innerHTML = v.ok
+      ? `<b class="ok-text">核对通过</b> · 库内 ${v.db_result_rows} 条 / 文件 ${v.file_result_rows} 条`
+      : `<b class="bad-text">核对失败</b>`;
+    box.innerHTML = '<table><thead><tr><th>检查项</th><th>结果</th><th>详情</th></tr></thead><tbody>' +
+      v.checks.map(c => `<tr><td>${esc(c.check)}</td>
+        <td class="${c.ok ? 'ok-text' : 'bad-text'}">${c.ok ? '通过' : '失败'}</td>
+        <td><code>${esc(JSON.stringify(c.detail))}</code></td></tr>`).join('') +
+      '</tbody></table>';
+  } catch (e) { box.innerHTML = ''; toast(e.message, true); }
+}
+
+function setFilter(s) { filterStatus = s; refreshPackets(); }
+
+async function refreshAll() {
+  try {
+    await Promise.all([refreshState(), refreshPackets(), refreshAudit()]);
+  } catch (e) { toast(e.message, true); }
+}
+setInterval(() => { if (document.getElementById('auto').checked) refreshAll(); }, 2000);
+refreshAll();
+</script>
+</body>
+</html>
